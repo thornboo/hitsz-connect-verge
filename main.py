@@ -260,6 +260,10 @@ class MainWindow(QMainWindow):
 if __name__ == "__main__":
     app = QApplication([])
     app.setQuitOnLastWindowClosed(False)
+    # Set application icon
+    app_icon = QIcon("assets/cloud-linear.svg")
+    app.setWindowIcon(app_icon)
     window = MainWindow()
+    window.setWindowIcon(app_icon)  # Set window icon
     window.show()
     app.exec()
