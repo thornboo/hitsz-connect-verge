@@ -39,6 +39,7 @@ jobs:
         path: dist/hitsz-connect-verge.exe
 
   release:
+    permissions: write-all
     needs: build
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
