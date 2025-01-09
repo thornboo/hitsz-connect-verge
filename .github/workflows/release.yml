@@ -9,7 +9,17 @@ on:
 jobs:
   build:
     permissions: write-all
-    runs-on: windows-latest
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest]
+        include:
+          - os: windows-latest
+            artifact_name: hitsz-connect-verge.exe
+            data_separator: ";"
+          - os: macos-latest
+            artifact_name: hitsz-connect-verge
+            data_separator: ":"
+    runs-on: ${{ matrix.os }}
 
     steps:
     - name: Checkout Code
@@ -26,16 +36,18 @@ jobs:
         pip install -r requirements.txt
 
     - name: Build Executable
+      shell: bash
       run: |
-        pyinstaller --clean --onefile --noconsole --icon assets/Graphicloads-Colorful-Long-Shadow-Cloud.ico `
-        --add-data "assets;assets" `
+        pyinstaller --clean --onefile --noconsole \
+        --add-data "assets${{ matrix.data_separator }}assets" \
+        ${{ runner.os == 'Windows' && '--icon assets/Graphicloads-Colorful-Long-Shadow-Cloud.ico' || '' }} \
         -n hitsz-connect-verge main.py
 
     - name: Archive Executable
       uses: actions/upload-artifact@v4
       with:
-        name: hitsz-connect-verge
-        path: dist/hitsz-connect-verge.exe
+        name: hitsz-connect-verge-${{ matrix.os }}
+        path: dist/${{ matrix.artifact_name }}
 
   release:
     permissions: write-all
@@ -44,15 +56,16 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Download Artifact
+    - name: Download All Artifacts
       uses: actions/download-artifact@v4
       with:
-        name: hitsz-connect-verge
-        path: hitsz-connect-verge
+        path: artifacts
+        pattern: hitsz-connect-verge-*
+        merge-multiple: true
 
     - name: Publish Release
       uses: ncipollo/release-action@v1
       with:
-        artifacts: "hitsz-connect-verge/*"
+        artifacts: "artifacts/*"
         token: ${{ secrets.GITHUB_TOKEN }}
         tag: ${{ github.ref_name }}

@@ -11,6 +11,9 @@ from subprocess import CREATE_NO_WINDOW
 
 # Proxy management (Windows-specific)
 def set_proxy(enable, server=None, port=None):
+    if platform.system() != "Windows":
+        return  # Proxy management only needed on Windows
+        
     if platform.system() == "Windows":
         import winreg as reg
         import ctypes
@@ -38,22 +41,23 @@ class CommandWorker(QThread):
         self.process = None
 
     def run(self):
-        if self.proxy_enabled:
+        if platform.system() == "Windows" and self.proxy_enabled:
             set_proxy(True, server="127.0.0.1", port=1081)
         
+        creation_flags = CREATE_NO_WINDOW if platform.system() == "Windows" else 0
         self.process = subprocess.Popen(
             self.command_args,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             universal_newlines=True,
             encoding="utf-8",
-            creationflags=CREATE_NO_WINDOW
+            creationflags=creation_flags
         )
         for line in self.process.stdout:
             self.output.emit(line)
         self.process.wait()
         
-        if self.proxy_enabled:
+        if platform.system() == "Windows" and self.proxy_enabled:
             set_proxy(False)
         
         self.finished.emit()
@@ -222,13 +226,18 @@ class MainWindow(QMainWindow):
 
         import os, sys
         if getattr(sys, 'frozen', False):
-            # Running as bundled exe
             base_path = sys._MEIPASS
         else:
-            # Running as script
             base_path = os.path.dirname(os.path.abspath(__file__))
             
-        command = os.path.join(base_path, "assets", "zju-connect.exe")
+        if platform.system() == "Windows":
+            command = os.path.join(base_path, "assets", "zju-connect.exe")
+        else:
+            command = os.path.join(base_path, "assets", "zju-connect")
+            # Ensure executable permissions on macOS
+            if os.path.exists(command):
+                os.chmod(command, 0o755)
+
         command_args = [
             command, "-server", shlex.quote(server_address),
             "-zju-dns-server", shlex.quote(dns_server_address),
