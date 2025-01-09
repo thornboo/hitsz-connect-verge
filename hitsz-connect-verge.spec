@@ -4,7 +4,7 @@
 a = Analysis(
     ['main.py'],
     pathex=[],
-    binaries=[('zju-connect.exe', '.')],
+    binaries=[],
     datas=[('assets', 'assets')],
     hiddenimports=[],
     hookspath=[],

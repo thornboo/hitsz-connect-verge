@@ -29,7 +29,6 @@ jobs:
       run: |
         pyinstaller --clean --onefile --noconsole --icon assets/Graphicloads-Colorful-Long-Shadow-Cloud.ico `
         --add-data "assets;assets" `
-        --add-binary "zju-connect.exe;." `
         -n hitsz-connect-verge main.py
 
     - name: Archive Executable

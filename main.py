@@ -228,7 +228,7 @@ class MainWindow(QMainWindow):
             # Running as script
             base_path = os.path.dirname(os.path.abspath(__file__))
             
-        command = os.path.join(base_path, "zju-connect.exe")
+        command = os.path.join(base_path, "assets", "zju-connect.exe")
         command_args = [
             command, "-server", shlex.quote(server_address),
             "-zju-dns-server", shlex.quote(dns_server_address),
