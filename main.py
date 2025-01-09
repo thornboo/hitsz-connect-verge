@@ -6,6 +6,8 @@ from PySide6.QtCore import QThread, Signal
 import subprocess
 import platform
 import shlex
+# Add this import at the top with other imports
+from subprocess import CREATE_NO_WINDOW
 
 # Proxy management (Windows-specific)
 def set_proxy(enable, server=None, port=None):
@@ -44,7 +46,8 @@ class CommandWorker(QThread):
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             universal_newlines=True,
-            encoding="utf-8"
+            encoding="utf-8",
+            creationflags=CREATE_NO_WINDOW  # Add this line to hide console
         )
         for line in self.process.stdout:
             self.output.emit(line)

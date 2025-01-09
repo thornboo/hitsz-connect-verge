@@ -27,7 +27,7 @@ jobs:
 
     - name: Build Executable
       run: |
-        pyinstaller --onefile --add-binary "zju-connect.exe;." -n hitsz-connect-verge main.py
+        pyinstaller --onefile --noconsole --add-binary "zju-connect.exe;." -n hitsz-connect-verge main.py
 
     - name: Archive Executable
       uses: actions/upload-artifact@v4
