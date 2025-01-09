@@ -181,7 +181,15 @@ class MainWindow(QMainWindow):
         server_address = self.server_input.text()
         dns_server_address = self.dns_input.text()
 
-        command = "./zju-connect.exe"
+        import os, sys
+        if getattr(sys, 'frozen', False):
+            # Running as bundled exe
+            base_path = sys._MEIPASS
+        else:
+            # Running as script
+            base_path = os.path.dirname(os.path.abspath(__file__))
+            
+        command = os.path.join(base_path, "zju-connect.exe")
         command_args = [
             command, "-server", shlex.quote(server_address),
             "-zju-dns-server", shlex.quote(dns_server_address),
