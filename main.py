@@ -1,12 +1,12 @@
 import keyring
 from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QLabel, QLineEdit, QCheckBox, QPushButton, QTextEdit, QVBoxLayout, QHBoxLayout, QWidget
+    QApplication, QMainWindow, QLabel, QLineEdit, QCheckBox, QPushButton, QTextEdit, QVBoxLayout, QHBoxLayout, QWidget, QSystemTrayIcon, QMenu
 )
+from PySide6.QtGui import QIcon
 from PySide6.QtCore import QThread, Signal
 import subprocess
 import platform
 import shlex
-# Add this import at the top with other imports
 from subprocess import CREATE_NO_WINDOW
 
 # Proxy management (Windows-specific)
@@ -47,7 +47,7 @@ class CommandWorker(QThread):
             stderr=subprocess.STDOUT,
             universal_newlines=True,
             encoding="utf-8",
-            creationflags=CREATE_NO_WINDOW  # Add this line to hide console
+            creationflags=CREATE_NO_WINDOW
         )
         for line in self.process.stdout:
             self.output.emit(line)
@@ -68,10 +68,16 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("HITSZ Connect Verge")
-
-        self.service_name = "zju-connect"  # Identifier for keyring
-        self.username_key = "username"    # Key for storing username
-        self.password_key = "password"    # Key for storing password
+        self.setFixedSize(300, 500)
+        self.service_name = "hitsz-connect-verge"
+        self.username_key = "username"    
+        self.password_key = "password"    
+        
+        # Initialize system tray icon
+        self.tray_icon = QSystemTrayIcon(self)
+        self.tray_icon.setIcon(QIcon("assets/cloud-linear.svg"))
+        self.create_tray_menu()
+        self.tray_icon.show()
         
         self.worker = None
         self.setup_ui()
@@ -142,6 +148,35 @@ class MainWindow(QMainWindow):
         container = QWidget()
         container.setLayout(layout)
         self.setCentralWidget(container)
+
+    def create_tray_menu(self):
+        menu = QMenu()
+        show_action = menu.addAction("打开面板")
+        show_action.triggered.connect(self.show)
+        hide_action = menu.addAction("隐藏面板")
+        hide_action.triggered.connect(self.hide)
+        quit_action = menu.addAction("退出")
+        quit_action.triggered.connect(self.quit_app)
+        
+        self.tray_icon.setContextMenu(menu)
+        self.tray_icon.activated.connect(self.tray_icon_activated)
+
+    def tray_icon_activated(self, reason):
+        if reason == QSystemTrayIcon.DoubleClick:
+            self.show()
+            self.activateWindow()
+
+    def closeEvent(self, event):
+        if self.tray_icon.isVisible():
+            self.hide()
+            event.ignore()
+        else:
+            self.quit_app()
+
+    def quit_app(self):
+        self.stop_connection()
+        self.tray_icon.hide()
+        QApplication.quit()
 
     def toggle_password_visibility(self):
         if self.show_password_cb.isChecked():
@@ -224,6 +259,7 @@ class MainWindow(QMainWindow):
 # Run the application
 if __name__ == "__main__":
     app = QApplication([])
+    app.setQuitOnLastWindowClosed(False)
     window = MainWindow()
     window.show()
     app.exec()
