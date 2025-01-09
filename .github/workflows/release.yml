@@ -27,7 +27,19 @@ jobs:
 
     - name: Build Executable
       run: |
-        pyinstaller --onefile --noconsole --icon assets/cloud-linear.ico --add-binary "zju-connect.exe;." -n hitsz-connect-verge main.py
+        pyinstaller --clean --onefile --noconsole --icon assets/cloud-linear.ico ^
+        --hidden-import keyring ^
+        --hidden-import PySide6.QtWidgets ^
+        --hidden-import PySide6.QtGui ^
+        --hidden-import PySide6.QtCore ^
+        --exclude-module matplotlib ^
+        --exclude-module numpy ^
+        --exclude-module PIL ^
+        --exclude-module pandas ^
+        --exclude-module notebook ^
+        --exclude-module scipy ^
+        --add-binary "zju-connect.exe;." ^
+        -n hitsz-connect-verge main.py
 
     - name: Archive Executable
       uses: actions/upload-artifact@v4
