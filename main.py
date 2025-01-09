@@ -75,7 +75,7 @@ class MainWindow(QMainWindow):
         
         # Initialize system tray icon
         self.tray_icon = QSystemTrayIcon(self)
-        self.tray_icon.setIcon(QIcon("assets/cloud-linear.svg"))
+        self.tray_icon.setIcon(QIcon("assets/Graphicloads-Colorful-Long-Shadow-Cloud.ico"))
         self.create_tray_menu()
         self.tray_icon.show()
         
@@ -261,7 +261,7 @@ if __name__ == "__main__":
     app = QApplication([])
     app.setQuitOnLastWindowClosed(False)
     # Set application icon
-    app_icon = QIcon("assets/cloud-linear.svg")
+    app_icon = QIcon("assets/Graphicloads-Colorful-Long-Shadow-Cloud.ico")
     app.setWindowIcon(app_icon)
     window = MainWindow()
     window.setWindowIcon(app_icon)  # Set window icon

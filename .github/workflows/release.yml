@@ -27,18 +27,12 @@ jobs:
 
     - name: Build Executable
       run: |
-        pyinstaller --clean --onefile --noconsole --icon assets/cloud-linear.ico ^
-        --hidden-import keyring ^
-        --hidden-import PySide6.QtWidgets ^
-        --hidden-import PySide6.QtGui ^
-        --hidden-import PySide6.QtCore ^
-        --exclude-module matplotlib ^
-        --exclude-module numpy ^
-        --exclude-module PIL ^
-        --exclude-module pandas ^
-        --exclude-module notebook ^
-        --exclude-module scipy ^
-        --add-binary "zju-connect.exe;." ^
+        pyinstaller --clean --onefile --noconsole --icon assets/Graphicloads-Colorful-Long-Shadow-Cloud.ico ^
+        --hidden-import keyring `
+        --hidden-import PySide6.QtWidgets `
+        --hidden-import PySide6.QtGui `
+        --hidden-import PySide6.QtCore `
+        --add-binary "zju-connect.exe;." `
         -n hitsz-connect-verge main.py
 
     - name: Archive Executable
