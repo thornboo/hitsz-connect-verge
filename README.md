@@ -2,7 +2,7 @@
 
 ## Introduction
 
-HITSZ Connect Verge is an application that helps you connect to the campus network of Harbin Institute of Technology, Shenzhen. It is based on the [zju-connect](https://github.com/Mythologyli/zju-connect) project.
+HITSZ Connect Verge is an application that helps you connect to the campus network of Harbin Institute of Technology, Shenzhen. It is a GUI wrapper of [zju-connect](https://github.com/Mythologyli/zju-connect) project and adapted to the HITSZ network.
 
 ## Features
 
@@ -60,7 +60,7 @@ You can build the binaries for Windows by running:
 <!-- dark mode and light mode -->
 |   Light mode   |   Dark mode   |
 | ---- | ---- |
-|  ![Light](assets/Light.png)    | ![Dark](assets/dark.png)  |
+|  ![Light](assets/light.png)    | ![Dark](assets/dark.png)  |
 
 ## Contributing
 
