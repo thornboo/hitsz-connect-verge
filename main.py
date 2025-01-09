@@ -75,7 +75,8 @@ class MainWindow(QMainWindow):
         
         # Initialize system tray icon
         self.tray_icon = QSystemTrayIcon(self)
-        self.tray_icon.setIcon(QIcon("assets/Graphicloads-Colorful-Long-Shadow-Cloud.ico"))
+        icon_path = self.get_resource_path("assets/Graphicloads-Colorful-Long-Shadow-Cloud.ico")
+        self.tray_icon.setIcon(QIcon(icon_path))
         self.create_tray_menu()
         self.tray_icon.show()
         
@@ -256,12 +257,24 @@ class MainWindow(QMainWindow):
         self.worker = None
         self.status_label.setText("状态: 已停止")
 
+    def get_resource_path(self, relative_path):
+        """Get absolute path to resource, works for dev and for PyInstaller"""
+        import os, sys
+        if getattr(sys, 'frozen', False):
+            # Running as bundled exe
+            base_path = sys._MEIPASS
+        else:
+            # Running as script
+            base_path = os.path.dirname(os.path.abspath(__file__))
+        return os.path.join(base_path, relative_path)
+
 # Run the application
 if __name__ == "__main__":
     app = QApplication([])
     app.setQuitOnLastWindowClosed(False)
     # Set application icon
-    app_icon = QIcon("assets/Graphicloads-Colorful-Long-Shadow-Cloud.ico")
+    icon_path = MainWindow.get_resource_path("assets/Graphicloads-Colorful-Long-Shadow-Cloud.ico")
+    app_icon = QIcon(icon_path)
     app.setWindowIcon(app_icon)
     window = MainWindow()
     window.setWindowIcon(app_icon)  # Set window icon
