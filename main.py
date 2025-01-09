@@ -257,7 +257,8 @@ class MainWindow(QMainWindow):
         self.worker = None
         self.status_label.setText("状态: 已停止")
 
-    def get_resource_path(self, relative_path):
+    @staticmethod
+    def get_resource_path(relative_path):
         """Get absolute path to resource, works for dev and for PyInstaller"""
         import os, sys
         if getattr(sys, 'frozen', False):
@@ -272,11 +273,11 @@ class MainWindow(QMainWindow):
 if __name__ == "__main__":
     app = QApplication([])
     app.setQuitOnLastWindowClosed(False)
-    # Set application icon
+    
     icon_path = MainWindow.get_resource_path("assets/Graphicloads-Colorful-Long-Shadow-Cloud.ico")
     app_icon = QIcon(icon_path)
     app.setWindowIcon(app_icon)
+    
     window = MainWindow()
-    window.setWindowIcon(app_icon)  # Set window icon
     window.show()
     app.exec()
