@@ -28,10 +28,7 @@ jobs:
     - name: Build Executable
       run: |
         pyinstaller --clean --onefile --noconsole --icon assets/Graphicloads-Colorful-Long-Shadow-Cloud.ico `
-        --hidden-import keyring `
-        --hidden-import PySide6.QtWidgets `
-        --hidden-import PySide6.QtGui `
-        --hidden-import PySide6.QtCore `
+        --exclude-module pyinstaller `
         --add-binary "zju-connect.exe;." `
         -n hitsz-connect-verge main.py
 
