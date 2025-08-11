@@ -73,20 +73,20 @@ jobs:
                   source .venv/bin/activate
                   pyside6-rcc app/resources/resources.qrc -o app/common/resources.py
 
-                  python -m nuitka \
-                    --standalone \
-                    --assume-yes-for-downloads \
-                    --enable-plugin=pyside6 \
-                    --include-data-dir=app=app \
-                    --include-data-files=.app-version=.app-version \
-                    --macos-target-arch=${{ matrix.target_arch }} \
-                    --macos-create-app-bundle \
-                    --macos-app-icon=app/resources/icons/icon.icns \
-                    --macos-app-name="HITSZ Connect Verge Preview" \
-                    --macos-app-version=$(cat .app-version)-preview \
-                    --output-dir=dist \
-                    --remove-output \
-                    app/main.py
+                                     python -m nuitka \
+                     --standalone \
+                     --assume-yes-for-downloads \
+                     --enable-plugin=pyside6 \
+                     --include-data-dir=app=app \
+                     --include-data-files=.app-version=.app-version \
+                     --macos-target-arch=${{ matrix.target_arch }} \
+                     --macos-create-app-bundle \
+                     --macos-app-icon=app/resources/icons/icon.icns \
+                     --macos-app-name="HITSZ Connect Verge Preview" \
+                     --macos-app-version=$(cat .app-version) \
+                     --output-dir=dist \
+                     --remove-output \
+                     app/main.py
 
                   mv dist/main.app dist/HITSZ\ Connect\ Verge\ Preview.app
 
@@ -112,21 +112,21 @@ jobs:
                   .\.venv\Scripts\Activate.ps1
                   pyside6-rcc .\app\resources\resources.qrc -o .\app\common\resources.py
 
-                  python -m nuitka `
-                    --standalone `
-                    --assume-yes-for-downloads `
-                    --enable-plugin=pyside6 `
-                    --include-data-dir=app=app `
-                    --include-data-files=app\core\zju-connect.exe=app\core\zju-connect.exe `
-                    --include-data-files=.app-version=.app-version `
-                    --product-name="HITSZ Connect Verge Preview" `
-                    --product-version=$(Get-Content .app-version)-preview `
-                    --file-description="HITSZ Connect Verge Preview" `
-                    --windows-icon-from-ico=app\resources\icons\icon.ico `
-                    --windows-console-mode=disable `
-                    --output-dir=dist `
-                    --remove-output `
-                    app/main.py
+                           python -m nuitka `
+           --standalone `
+           --assume-yes-for-downloads `
+           --enable-plugin=pyside6 `
+           --include-data-dir=app=app `
+           --include-data-files=app\core\zju-connect.exe=app\core\zju-connect.exe `
+           --include-data-files=.app-version=.app-version `
+           --product-name="HITSZ Connect Verge Preview" `
+           --product-version=$(Get-Content .app-version) `
+           --file-description="HITSZ Connect Verge Preview" `
+           --windows-icon-from-ico=app\resources\icons\icon.ico `
+           --windows-console-mode=disable `
+           --output-dir=dist `
+           --remove-output `
+           app/main.py
 
             - name: Compile Installer (Windows)
               if: runner.os == 'Windows'
@@ -134,12 +134,12 @@ jobs:
                   # Install Inno Setup
                   choco install innosetup -y
 
-                  # Compile installer
-                  $version = Get-Content .app-version
-                  $setup_script = ".\setup.iss"
-                  iscc /DMyAppVersion="$version-preview" `
-                       /DArchitecture="${{ matrix.arch }}" `
-                       $setup_script
+                           # Compile installer
+         $version = Get-Content .app-version
+         $setup_script = ".\setup.iss"
+         iscc /DMyAppVersion="$version" `
+              /DArchitecture="${{ matrix.arch }}" `
+              $setup_script
 
             # Linux specific build
             - name: Cache apt packages
@@ -170,19 +170,18 @@ jobs:
                   source .venv/bin/activate
                   pyside6-rcc app/resources/resources.qrc -o app/common/resources.py
 
-                  python -m nuitka \
-                    --standalone \
-                    --assume-yes-for-downloads \
-                    --enable-plugin=pyside6 \
-                    --include-data-dir=app=app \
-                    --include-data-files=.app-version=.app-version \
-                    --product-name="HITSZ Connect Verge Preview" \
-                    --product-version=$(cat .app-version)-preview \
-                    --file-description="HITSZ Connect Verge Preview" \
-                    --linux-icon=app/resources/icons/icon.png \
-                    --output-dir=dist \
-                    --remove-output \
-                    app/main.py
+                           python -m nuitka \
+           --standalone \
+           --assume-yes-for-downloads \
+           --enable-plugin=pyside6 \
+           --include-data-dir=app=app \
+           --include-data-files=.app-version=.app-version \
+           --product-name="HITSZ Connect Verge Preview" \
+           --file-description="HITSZ Connect Verge Preview" \
+           --linux-icon=app/resources/icons/icon.png \
+           --output-dir=dist \
+           --remove-output \
+           app/main.py
 
                     mv dist/main.dist dist/hitsz-connect-verge-preview
                     mv dist/hitsz-connect-verge-preview/main.bin dist/hitsz-connect-verge-preview/hitsz-connect-verge-preview
@@ -221,17 +220,17 @@ jobs:
                   Categories=Network;
                   EOF
 
-                  cat > deb/DEBIAN/control << EOF
-                  Package: hitsz-connect-verge-preview
-                  Version: $VERSION-preview
-                  Section: net
-                  Priority: optional
-                  Architecture: ${{ matrix.arch == 'amd64' && 'amd64' || 'arm64' }}
-                  Maintainer: Kowyo
-                  Description: HITSZ Connect Verge Preview
-                   A preview version of VPN client for ZJU Connect/EasyConnect users.
-                  Depends: libc6, libglib2.0-0, libgl1
-                  EOF
+                           cat > deb/DEBIAN/control << EOF
+         Package: hitsz-connect-verge-preview
+         Version: $VERSION
+         Section: net
+         Priority: optional
+         Architecture: ${{ matrix.arch == 'amd64' && 'amd64' || 'arm64' }}
+         Maintainer: Kowyo
+         Description: HITSZ Connect Verge Preview
+          A preview version of VPN client for ZJU Connect/EasyConnect users.
+         Depends: libc6, libglib2.0-0, libgl1
+         EOF
 
                   dpkg-deb --build deb dist/hitsz-connect-verge-preview-${{ matrix.os_name }}-${{ matrix.arch }}.deb
 
