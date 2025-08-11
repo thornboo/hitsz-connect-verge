@@ -240,7 +240,7 @@ jobs:
       with:
         name: hitsz-connect-verge-preview-${{ matrix.os_name }}-${{ matrix.arch }}
         path: |
-          ${{ runner.os == 'macOS' && 'dist/hitsz-connect-verge-preview-*.dmg' || '' }}
-          ${{ runner.os == 'Windows' && 'dist/hitsz-connect-verge-preview-*-setup.exe' || '' }}
-          ${{ runner.os == 'Linux' && 'dist/hitsz-connect-verge-preview-*.deb' || '' }}
+          ${{ runner.os == 'macOS' && 'dist/hitsz-connect-verge-*.dmg' || '' }}
+          ${{ runner.os == 'Windows' && 'dist/hitsz-connect-verge-*-setup.exe' || '' }}
+          ${{ runner.os == 'Linux' && 'dist/hitsz-connect-verge-*.deb' || '' }}
         if-no-files-found: error
