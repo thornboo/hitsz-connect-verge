@@ -39,6 +39,7 @@ class CommandWorker(QThread):
         self.proxy_enabled = proxy_enabled
         self.window = window
         self.process = None
+        self._should_stop = False
         self._proxy_handlers = {
             "Windows": set_windows_proxy,
             "Darwin": set_macos_proxy,
@@ -46,39 +47,101 @@ class CommandWorker(QThread):
         }
 
     def run(self):
+        error_occurred = False
         try:
+            # Check if we should stop before starting
+            if self._should_stop:
+                return
+
             # Set proxy if enabled
             if self.proxy_enabled and self.window:
-                proxy_handler = self._proxy_handlers.get(system())
-                if proxy_handler:
-                    proxy_handler(True, *get_proxy_settings(self.window))
+                try:
+                    proxy_handler = self._proxy_handlers.get(system())
+                    if proxy_handler:
+                        proxy_handler(True, *get_proxy_settings(self.window))
+                except Exception as e:
+                    self.output.emit(f"代理设置失败: {str(e)}\n")
+
+            # Check again before starting process
+            if self._should_stop:
+                return
 
             # Run process
-            creation_flags = CREATE_NO_WINDOW if system() == "Windows" else 0
-            self.process = subprocess.Popen(
-                self.command_args,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                universal_newlines=True,
-                encoding="utf-8",
-                creationflags=creation_flags,
-            )
+            try:
+                creation_flags = CREATE_NO_WINDOW if system() == "Windows" else 0
+                self.process = subprocess.Popen(
+                    self.command_args,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    universal_newlines=True,
+                    encoding="utf-8",
+                    creationflags=creation_flags,
+                )
+            except FileNotFoundError as e:
+                self.output.emit(f"无法启动进程: 找不到可执行文件\n{str(e)}\n")
+                error_occurred = True
+                return
+            except Exception as e:
+                self.output.emit(f"进程启动失败: {str(e)}\n")
+                error_occurred = True
+                return
 
-            for line in self.process.stdout:
-                self.output.emit(line)
-            self.process.wait()
+            # Read output with stop checking
+            try:
+                while not self._should_stop and self.process.poll() is None:
+                    line = self.process.stdout.readline()
+                    if line:
+                        self.output.emit(line)
+                    else:
+                        # Small delay to prevent busy waiting
+                        time.sleep(0.1)
+                
+                # Read any remaining output
+                if not self._should_stop:
+                    remaining_output = self.process.stdout.read()
+                    if remaining_output:
+                        self.output.emit(remaining_output)
+                    
+                    # Wait for process and check exit code
+                    exit_code = self.process.wait()
+                    if exit_code != 0:
+                        self.output.emit(f"进程异常退出，退出代码: {exit_code}\n")
+                        error_occurred = True
+                        
+            except Exception as e:
+                self.output.emit(f"读取进程输出时发生错误: {str(e)}\n")
+                error_occurred = True
+
+        except Exception as e:
+            self.output.emit(f"线程运行时发生未预期的错误: {str(e)}\n")
+            error_occurred = True
         finally:
             # Disable proxy on completion
             if self.proxy_enabled:
-                proxy_handler = self._proxy_handlers.get(system())
-                if proxy_handler:
-                    proxy_handler(False)
+                try:
+                    proxy_handler = self._proxy_handlers.get(system())
+                    if proxy_handler:
+                        proxy_handler(False)
+                except Exception as e:
+                    self.output.emit(f"代理清理失败: {str(e)}\n")
             
             # Small delay to allow socket cleanup
             time.sleep(0.5)
-            self.finished.emit()
+            
+            # Always emit finished signal to ensure proper cleanup
+            try:
+                self.finished.emit()
+            except RuntimeError:
+                # Signal connection may have been destroyed, but that's ok
+                pass
 
     def stop(self):
+        # Set stop flag first
+        self._should_stop = True
+        
+        # Request thread interruption
+        self.requestInterruption()
+        
         if self.process:
             try:
                 # First try graceful termination

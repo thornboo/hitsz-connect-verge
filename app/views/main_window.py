@@ -113,6 +113,8 @@ class MainWindow(QMainWindow):
         handle_close_event(self, event, self.tray_icon)
 
     def quit_app(self):
+        # Ensure connection is stopped before quitting
+        self.stop_connection()
         quit_app(self, self.tray_icon)
 
     def save_credentials(self):

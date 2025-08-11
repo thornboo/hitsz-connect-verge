@@ -34,7 +34,7 @@ def wait_for_port_release(host, port, max_wait=5):
     while time.time() - start_time < max_wait:
         if not is_port_in_use(host, port):
             return True
-        time.sleep(0.5)
+        time.sleep(0.1)  # 减少从0.5秒到0.1秒，提高响应速度
     return False
 def handle_output(window, text):
     """Handle output text from the worker"""
@@ -110,8 +110,19 @@ def start_connection(window):
         command = os.path.join(base_path, "app", "core", "zju-connect.exe")
     else:
         command = os.path.join(base_path, "app", "core", "zju-connect")
-        if os.path.exists(command):
-            os.chmod(command, 0o755)
+    
+    # Check if executable exists
+    if not os.path.exists(command):
+        error_msg = f"错误: 找不到 zju-connect 可执行文件\n路径: {command}\n请确保已正确安装所有必需的文件。"
+        window.output_text.append(error_msg)
+        window.status_label.setText("状态: 启动失败")
+        if hasattr(window, "connect_button"):
+            window.connect_button.setChecked(False)
+        return
+    
+    # Set executable permission on Unix-like systems
+    if system() != "Windows" and os.path.exists(command):
+        os.chmod(command, 0o755)
 
     command_args = [
         command,
@@ -194,37 +205,63 @@ def start_connection(window):
 def stop_connection(window):
     """Stop VPN connection with proper cleanup"""
     if window.worker:
-        # First stop the worker process
-        window.worker.stop()
-        window.worker.wait()
-        window.worker.output.disconnect()
-        window.worker.finished.disconnect()
-        window.worker.deleteLater()
-        window.worker = None
-        gc.collect()
-        
-        # Wait a moment for ports to be released
-        window.output_text.append("等待端口释放...\n")
-        
-        # Check if ports are released and wait if necessary
-        ports_to_check = []
-        if hasattr(window, 'socks_bind') and window.socks_bind:
+        try:
+            # First stop the worker process
+            window.worker.stop()
+            
+            # Wait for thread to finish, but with timeout
+            if not window.worker.wait(5000):  # 5 second timeout
+                # If thread doesn't finish gracefully, terminate it
+                window.worker.terminate()
+                window.worker.wait(2000)  # 2 second timeout for termination
+            
+            # Safely disconnect signals
             try:
-                ports_to_check.append(int(window.socks_bind))
-            except ValueError:
-                pass
-        
-        if hasattr(window, 'http_bind') and window.http_bind:
+                window.worker.output.disconnect()
+            except (RuntimeError, TypeError):
+                pass  # Signal may already be disconnected
+            
             try:
-                ports_to_check.append(int(window.http_bind))
-            except ValueError:
-                pass
+                window.worker.finished.disconnect()
+            except (RuntimeError, TypeError):
+                pass  # Signal may already be disconnected
+            
+            # Schedule thread deletion
+            window.worker.deleteLater()
+            window.worker = None
+            gc.collect()
+            
+            # Wait a moment for ports to be released
+            if hasattr(window, 'output_text'):
+                window.output_text.append("等待端口释放...\n")
+            
+            # Check if ports are released and wait if necessary
+            ports_to_check = []
+            if hasattr(window, 'socks_bind') and window.socks_bind:
+                try:
+                    ports_to_check.append(int(window.socks_bind))
+                except ValueError:
+                    pass
+            
+            if hasattr(window, 'http_bind') and window.http_bind:
+                try:
+                    ports_to_check.append(int(window.http_bind))
+                except ValueError:
+                    pass
+            
+            # Wait for each port to be released
+            for port in ports_to_check:
+                if wait_for_port_release("127.0.0.1", port, max_wait=3):
+                    if hasattr(window, 'output_text'):
+                        window.output_text.append(f"端口 {port} 已释放\n")
+                else:
+                    if hasattr(window, 'output_text'):
+                        window.output_text.append(f"警告: 端口 {port} 可能仍在使用中\n")
         
-        # Wait for each port to be released
-        for port in ports_to_check:
-            if wait_for_port_release("127.0.0.1", port, max_wait=3):
-                window.output_text.append(f"端口 {port} 已释放\n")
-            else:
-                window.output_text.append(f"警告: 端口 {port} 可能仍在使用中\n")
+        except Exception as e:
+            # Handle any cleanup errors gracefully
+            if hasattr(window, 'output_text'):
+                window.output_text.append(f"清理连接时发生错误: {str(e)}\n")
 
-    window.status_label.setText("状态: 未连接")
+    if hasattr(window, 'status_label'):
+        window.status_label.setText("状态: 未连接")
