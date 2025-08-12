@@ -24,30 +24,30 @@ VERSION = get_version()
 
 
 class StatusIndicator(QWidget):
-    """状态指示器组件，显示彩色圆点"""
+    """Status indicator widget that displays a colored dot"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedSize(12, 12)
-        self.color = Qt.red  # 默认红色（未连接）
+        self.color = Qt.red  # Default red (not connected)
 
     def set_status(self, connected: bool):
-        """设置连接状态"""
+        """Set connection status"""
         self.color = Qt.green if connected else Qt.red
-        self.update()  # 触发重绘
+        self.update()  # Trigger redraw
 
     def paintEvent(self, event):
-        """绘制圆点"""
+        """Paint the status dot"""
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)  # 抗锯齿
+        painter.setRenderHint(QPainter.Antialiasing)  # Antialiasing
 
-        # 设置画笔和画刷
+        # Set pen and brush
         pen = QPen(self.color, 1)
         brush = QBrush(self.color)
         painter.setPen(pen)
         painter.setBrush(brush)
 
-        # 绘制圆点
+        # Draw circle
         painter.drawEllipse(1, 1, 10, 10)
 
 
@@ -103,19 +103,19 @@ class MainWindow(QMainWindow):
         layout.addLayout(status_layout)
         status_layout.addStretch()
 
-        # 创建状态指示器和标签的容器
+        # Container for the status indicator and label
         status_container = QHBoxLayout()
-        status_container.setSpacing(8)  # 设置间距
+        status_container.setSpacing(8)  # Set spacing
 
-        # 添加状态指示器
+        # Add status indicator
         self.status_indicator = StatusIndicator()
         status_container.addWidget(self.status_indicator)
 
-        # 添加状态标签
+        # Add status label
         self.status_label = QLabel("状态: 未连接")
         status_container.addWidget(self.status_label)
 
-        # 创建包装容器并添加到主布局
+        # Create wrapper container and add to main layout
         status_wrapper = QWidget()
         status_wrapper.setLayout(status_container)
         status_layout.addWidget(status_wrapper)
@@ -123,9 +123,9 @@ class MainWindow(QMainWindow):
         self.output_text = QTextEdit()
         self.output_text.setReadOnly(True)
 
-        # 优化日志显示性能
-        # QTextEdit没有setMaximumBlockCount，改为禁用撤销/重做来减少内存使用
-        self.output_text.setUndoRedoEnabled(False)  # 禁用撤销/重做功能，减少内存使用
+        # Optimize log display performance
+        # QTextEdit lacks setMaximumBlockCount; disable undo/redo to reduce memory usage
+        self.output_text.setUndoRedoEnabled(False)  # Disable undo/redo to reduce memory usage
 
         layout.addWidget(self.output_text)
 
@@ -187,6 +187,6 @@ class MainWindow(QMainWindow):
         check_for_updates(self, self.version, startup=True)
 
     def update_status(self, text: str, connected: bool = False):
-        """更新状态文本和指示器"""
+        """Update status text and indicator"""
         self.status_label.setText(text)
         self.status_indicator.set_status(connected)

@@ -1,4 +1,5 @@
 import subprocess
+import os
 import signal
 import time
 from platform import system
@@ -45,6 +46,11 @@ class CommandWorker(QThread):
             "Darwin": set_macos_proxy,
             "Linux": set_linux_proxy,
         }
+        # Derive executable name for robust cleanup
+        try:
+            self.exe_name = os.path.basename(self.command_args[0]) if self.command_args else None
+        except Exception:
+            self.exe_name = None
 
     def run(self):
         error_occurred = False
@@ -60,7 +66,7 @@ class CommandWorker(QThread):
                     if proxy_handler:
                         proxy_handler(True, *get_proxy_settings(self.window))
                 except Exception as e:
-                    self.output.emit(f"代理设置失败: {str(e)}\n")
+                    self.output.emit(f"Failed to set proxy: {str(e)}\n")
 
             # Check again before starting process
             if self._should_stop:
@@ -78,11 +84,11 @@ class CommandWorker(QThread):
                     creationflags=creation_flags,
                 )
             except FileNotFoundError as e:
-                self.output.emit(f"无法启动进程: 找不到可执行文件\n{str(e)}\n")
+                self.output.emit(f"Failed to start process: executable not found\n{str(e)}\n")
                 error_occurred = True
                 return
             except Exception as e:
-                self.output.emit(f"进程启动失败: {str(e)}\n")
+                self.output.emit(f"Process start failed: {str(e)}\n")
                 error_occurred = True
                 return
 
@@ -105,15 +111,15 @@ class CommandWorker(QThread):
                     # Wait for process and check exit code
                     exit_code = self.process.wait()
                     if exit_code != 0:
-                        self.output.emit(f"进程异常退出，退出代码: {exit_code}\n")
+                        self.output.emit(f"Process exited with non-zero code: {exit_code}\n")
                         error_occurred = True
                         
             except Exception as e:
-                self.output.emit(f"读取进程输出时发生错误: {str(e)}\n")
+                self.output.emit(f"Error reading process output: {str(e)}\n")
                 error_occurred = True
 
         except Exception as e:
-            self.output.emit(f"线程运行时发生未预期的错误: {str(e)}\n")
+            self.output.emit(f"Unexpected error during thread run: {str(e)}\n")
             error_occurred = True
         finally:
             # Disable proxy on completion
@@ -123,7 +129,7 @@ class CommandWorker(QThread):
                     if proxy_handler:
                         proxy_handler(False)
                 except Exception as e:
-                    self.output.emit(f"代理清理失败: {str(e)}\n")
+                    self.output.emit(f"Proxy cleanup failed: {str(e)}\n")
             
             # Small delay to allow socket cleanup
             time.sleep(0.5)
@@ -177,26 +183,28 @@ class CommandWorker(QThread):
                 self.process = None
     
     def _cleanup_remaining_processes(self):
-        """Clean up any remaining zju-connect processes that might be holding ports"""
+        """Clean up any remaining processes of the current executable that might be holding ports"""
         try:
+            if not self.exe_name:
+                return
             if system() == "Windows":
-                # Find and kill any remaining zju-connect.exe processes
+                # Find and kill any remaining processes by image name
                 result = subprocess.run(
-                    ["tasklist", "/FI", "IMAGENAME eq zju-connect.exe", "/FO", "CSV"],
+                    ["tasklist", "/FI", f"IMAGENAME eq {self.exe_name}", "/FO", "CSV"],
                     capture_output=True,
                     text=True,
                     timeout=5
                 )
-                if "zju-connect.exe" in result.stdout:
+                if self.exe_name in result.stdout:
                     subprocess.run(
-                        ["taskkill", "/F", "/IM", "zju-connect.exe"],
+                        ["taskkill", "/F", "/IM", self.exe_name],
                         capture_output=True,
                         timeout=5
                     )
             else:
-                # On Unix-like systems, find and kill zju-connect processes
+                # On Unix-like systems, find and kill processes by executable name
                 result = subprocess.run(
-                    ["pgrep", "-f", "zju-connect"],
+                    ["pgrep", "-f", self.exe_name],
                     capture_output=True,
                     text=True,
                     timeout=5

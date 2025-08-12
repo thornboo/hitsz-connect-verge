@@ -6,8 +6,12 @@ import subprocess
 from platform import system
 import shlex
 import gc
+import logging
+import datetime
+from PySide6.QtGui import QTextCursor
 from .set_proxy import CommandWorker
 
+logger = logging.getLogger(__name__)
 
 def is_port_in_use(host, port):
     """Check if a port is currently in use"""
@@ -16,7 +20,10 @@ def is_port_in_use(host, port):
             sock.settimeout(1)
             result = sock.connect_ex((host, port))
             return result == 0
-    except:
+    except Exception as e:
+        logger.debug(
+            "is_port_in_use check failed for %s:%s: %s", host, port, e
+        )
         return True  # Assume port is in use if we can't check
 
 
@@ -34,9 +41,9 @@ def get_port_process_info(port):
                     if len(parts) > 4:
                         pid = parts[-1]
 
-                        # 特殊处理PID为0的情况
+                        # Special handling for PID 0
                         if pid == "0":
-                            return "系统进程(可能为TIME_WAIT状态的连接)"
+                            return "System process (possibly TIME_WAIT connection)"
 
                         try:
                             # Get process name from PID
@@ -51,7 +58,12 @@ def get_port_process_info(port):
                                 # Parse CSV output, process name is first field
                                 process_name = lines[1].split(",")[0].strip('"')
                                 return process_name
-                        except:
+                        except Exception as _:
+                            logger.debug(
+                                "Failed to resolve process name for PID %s while checking port %s",
+                                pid,
+                                port,
+                            )
                             return f"PID {pid}"
         else:
             # Unix-like systems
@@ -64,8 +76,16 @@ def get_port_process_info(port):
                 parts = lines[1].split()
                 if len(parts) > 0:
                     return parts[0]  # Process name
-    except Exception:
-        pass
+    except subprocess.TimeoutExpired:
+        logger.debug("Timed out while checking process info for port %s", port)
+    except FileNotFoundError as e:
+        logger.debug(
+            "Required tool not found while checking process info for port %s: %s",
+            port,
+            e,
+        )
+    except Exception as e:
+        logger.debug("Failed to get process info for port %s: %s", port, e)
     return None
 
 
@@ -85,11 +105,15 @@ def is_port_in_timewait_state(port):
                     if len(parts) > 4:
                         pid = parts[-1]
                         state = parts[3] if len(parts) > 3 else ""
-                        # 检查是否为TIME_WAIT状态或PID为0
+                        # Check TIME_WAIT state or PID 0
                         if pid == "0" or "TIME_WAIT" in state:
                             return True
-    except Exception:
-        pass
+    except subprocess.TimeoutExpired:
+        logger.debug("Timed out while checking TIME_WAIT state for port %s", port)
+    except Exception as e:
+        logger.debug(
+            "Failed to check TIME_WAIT state for port %s: %s", port, e
+        )
     return False
 
 
@@ -100,14 +124,13 @@ def wait_for_port_release(host, port, max_wait=5):
         if not is_port_in_use(host, port):
             return True
 
-        # 检查是否是进程0占用（TIME_WAIT状态）
+        # Check if occupied by system process (TIME_WAIT)
         process_info = get_port_process_info(port)
-        if process_info and "系统进程" in process_info:
-            # 对于TIME_WAIT状态的连接，等待时间可能需要更长
-            # 但我们可以尝试使用更短的间隔来检查
-            time.sleep(0.05)  # 更短的检查间隔
+        if process_info and ("系统进程" in process_info or "System process" in process_info):
+            # For TIME_WAIT connections, shorter polling may help
+            time.sleep(0.05)
         else:
-            time.sleep(0.1)  # 正常的检查间隔
+            time.sleep(0.1)
     return False
 
 
@@ -137,10 +160,11 @@ def _rotate_logs_if_needed(window):
         recent_lines = lines[-KEEP_LINES:]
 
         # Add a rotation marker with timestamp
-        import datetime
 
         timestamp = datetime.datetime.now().strftime("%H:%M:%S")
-        rotation_marker = f"--- 日志已轮转 ({timestamp}) - 保留最近 {KEEP_LINES} 行 ---"
+        rotation_marker = (
+            f"--- Log rotated ({timestamp}) - keeping last {KEEP_LINES} lines ---"
+        )
 
         # Combine the marker with recent lines
         new_content = rotation_marker + "\n" + "\n".join(recent_lines)
@@ -149,7 +173,6 @@ def _rotate_logs_if_needed(window):
         window.output_text.setPlainText(new_content)
 
         # Scroll to bottom to show latest content
-        from PySide6.QtGui import QTextCursor
 
         cursor = window.output_text.textCursor()
         cursor.movePosition(QTextCursor.End)
@@ -165,6 +188,63 @@ def append_log_with_rotation(window, text):
     _rotate_logs_if_needed(window)
 
 
+def _check_single_port_conflict(window, port_type, bind_value, used_ports, prior_port_label=None):
+    """Check a single port bind and return a list of conflict messages.
+
+    - port_type: e.g., "SOCKS5" or "HTTP"
+    - bind_value: string port value from window (e.g., window.socks_bind)
+    - used_ports: a set to track already used ports within current session's check
+    - prior_port_label: if provided, when current port is in used_ports,
+      report conflict with this label (e.g., "SOCKS5 port")
+    """
+    conflict_messages = []
+    if not bind_value:
+        return conflict_messages
+
+    try:
+        port_value = int(bind_value)
+
+        # Check conflict with previously recorded port(s)
+        if prior_port_label and port_value in used_ports:
+            conflict_messages.append(
+                f"{port_type} port {port_value} conflicts with {prior_port_label}"
+            )
+        elif is_port_in_use("127.0.0.1", port_value):
+            process_info = get_port_process_info(port_value)
+            if process_info:
+                if ("系统进程" in process_info) or ("System process" in process_info):
+                    append_log_with_rotation(
+                        window,
+                        f"⚠️  {port_type} port {port_value} is in TIME_WAIT state, will attempt to wait for release...",
+                    )
+                    if wait_for_port_release("127.0.0.1", port_value, max_wait=3):
+                        append_log_with_rotation(
+                            window, f"✅ {port_type} port {port_value} has been released"
+                        )
+                    else:
+                        conflict_messages.append(
+                            f"{port_type} port {port_value} is occupied by {process_info}"
+                        )
+                else:
+                    conflict_messages.append(
+                        f"{port_type} port {port_value} is occupied by program {process_info}"
+                    )
+            else:
+                conflict_messages.append(
+                    f"{port_type} port {port_value} is occupied by another program"
+                )
+
+        # Record this port as used for subsequent checks
+        used_ports.add(port_value)
+
+    except ValueError:
+        append_log_with_rotation(
+            window, f"Warning: invalid {port_type} port configuration: {bind_value}"
+        )
+
+    return conflict_messages
+
+
 def handle_connection_finished(window):
     """Handle connection finished event with proper cleanup"""
     if window.worker:
@@ -174,11 +254,11 @@ def handle_connection_finished(window):
         window.worker = None
         gc.collect()
 
-    # 使用新的状态更新方法，同时更新文本和指示器
+    # Use the new status update method to update text and indicator
     if hasattr(window, "update_status"):
         window.update_status("状态: 未连接", connected=False)
     else:
-        # 向后兼容
+        # Backward compatibility
         window.status_label.setText("状态: 未连接")
 
     if hasattr(window, "connect_button"):
@@ -203,86 +283,44 @@ def start_connection(window):
     # Check for port conflicts but do not automatically switch ports
     append_log_with_rotation(
         window,
-        f"端口配置检查 - SOCKS5: {getattr(window, 'socks_bind', 'None')}, HTTP: {getattr(window, 'http_bind', 'None')}",
+        f"Port configuration check - SOCKS5: {getattr(window, 'socks_bind', 'None')}, HTTP: {getattr(window, 'http_bind', 'None')}",
     )
 
-    # 检查端口冲突，但仅警告，不自动切换
+    # Check port conflicts, warn only, do not auto-switch
     used_ports = set()
     port_conflicts = []
 
+    # SOCKS5 port check
     if hasattr(window, "socks_bind") and window.socks_bind:
-        try:
-            socks_port = int(window.socks_bind)
-            if is_port_in_use("127.0.0.1", socks_port):
-                process_info = get_port_process_info(socks_port)
-                if process_info:
-                    if "系统进程" in process_info:
-                        # 特殊处理TIME_WAIT状态的端口
-                        append_log_with_rotation(
-                            window,
-                            f"⚠️  SOCKS5端口 {socks_port} 处于TIME_WAIT状态，将尝试等待释放...",
-                        )
-                        if wait_for_port_release("127.0.0.1", socks_port, max_wait=3):
-                            append_log_with_rotation(
-                                window, f"✅ SOCKS5端口 {socks_port} 已释放"
-                            )
-                        else:
-                            port_conflicts.append(
-                                f"SOCKS5端口 {socks_port} 被 {process_info} 占用"
-                            )
-                    else:
-                        port_conflicts.append(
-                            f"SOCKS5端口 {socks_port} 被 {process_info} 程序占用"
-                        )
-                else:
-                    port_conflicts.append(f"SOCKS5端口 {socks_port} 被其他程序占用")
-            used_ports.add(socks_port)
-        except ValueError:
-            append_log_with_rotation(
-                window, f"警告: SOCKS5端口配置无效: {window.socks_bind}"
+        port_conflicts.extend(
+            _check_single_port_conflict(
+                window,
+                port_type="SOCKS5",
+                bind_value=window.socks_bind,
+                used_ports=used_ports,
             )
+        )
 
+    # HTTP port check
     if hasattr(window, "http_bind") and window.http_bind:
-        try:
-            http_port = int(window.http_bind)
-            if http_port in used_ports:
-                port_conflicts.append(f"HTTP端口 {http_port} 与SOCKS5端口冲突")
-            elif is_port_in_use("127.0.0.1", http_port):
-                process_info = get_port_process_info(http_port)
-                if process_info:
-                    if "系统进程" in process_info:
-                        # 特殊处理TIME_WAIT状态的端口
-                        append_log_with_rotation(
-                            window,
-                            f"⚠️  HTTP端口 {http_port} 处于TIME_WAIT状态，将尝试等待释放...",
-                        )
-                        if wait_for_port_release("127.0.0.1", http_port, max_wait=3):
-                            append_log_with_rotation(
-                                window, f"✅ HTTP端口 {http_port} 已释放"
-                            )
-                        else:
-                            port_conflicts.append(
-                                f"HTTP端口 {http_port} 被 {process_info} 占用"
-                            )
-                    else:
-                        port_conflicts.append(
-                            f"HTTP端口 {http_port} 被 {process_info} 程序占用"
-                        )
-                else:
-                    port_conflicts.append(f"HTTP端口 {http_port} 被其他程序占用")
-            used_ports.add(http_port)
-        except ValueError:
-            append_log_with_rotation(
-                window, f"警告: HTTP端口配置无效: {window.http_bind}"
+        # If SOCKS5 port already recorded, pass label for clearer conflict message
+        port_conflicts.extend(
+            _check_single_port_conflict(
+                window,
+                port_type="HTTP",
+                bind_value=window.http_bind,
+                used_ports=used_ports,
+                prior_port_label="SOCKS5 port",
             )
+        )
 
-    # 如果有端口冲突，显示警告但继续尝试连接
+    # If there are conflicts, warn but still attempt to connect
     if port_conflicts:
         for conflict in port_conflicts:
             append_log_with_rotation(window, f"⚠️  {conflict}")
         append_log_with_rotation(
             window,
-            "注意: 检测到端口冲突，但将继续尝试连接。如果连接失败，请检查端口配置。",
+            "Note: Port conflicts detected; will still attempt to connect. If the connection fails, please check the port configuration.",
         )
 
     is_nuitka = "__compiled__" in globals()
@@ -301,7 +339,11 @@ def start_connection(window):
 
     # Check if executable exists
     if not os.path.exists(command):
-        error_msg = f"错误: 找不到 zju-connect 可执行文件\n路径: {command}\n请确保已正确安装所有必需的文件。"
+        error_msg = (
+            f"Error: zju-connect executable not found\n"
+            f"Path: {command}\n"
+            f"Please ensure all required files are properly installed."
+        )
         append_log_with_rotation(window, error_msg)
         if hasattr(window, "update_status"):
             window.update_status("状态: 启动失败", connected=False)
@@ -335,7 +377,7 @@ def start_connection(window):
 
     if window.http_bind:
         append_log_with_rotation(
-            window, f"最终HTTP端口配置: 127.0.0.1:{window.http_bind}"
+            window, f"Final HTTP port configuration: 127.0.0.1:{window.http_bind}"
         )
         command_args.extend(
             ["-http-bind", shlex.quote("127.0.0.1:" + window.http_bind)]
@@ -343,7 +385,7 @@ def start_connection(window):
 
     if window.socks_bind:
         append_log_with_rotation(
-            window, f"最终SOCKS5端口配置: 127.0.0.1:{window.socks_bind}"
+            window, f"Final SOCKS5 port configuration: 127.0.0.1:{window.socks_bind}"
         )
         command_args.extend(
             ["-socks-bind", shlex.quote("127.0.0.1:" + window.socks_bind)]
@@ -429,45 +471,42 @@ def stop_connection(window):
 
             # Wait a moment for ports to be released
             if hasattr(window, "output_text"):
-                append_log_with_rotation(window, "等待端口释放...")
+                append_log_with_rotation(window, "Waiting for ports to be released...")
 
             # Check if ports are released and wait if necessary
             ports_to_check = []
-            if hasattr(window, "socks_bind") and window.socks_bind:
+            for name in ("socks_bind", "http_bind"):
+                value = getattr(window, name, None)
+                if not value:
+                    continue
                 try:
-                    ports_to_check.append(int(window.socks_bind))
-                except ValueError:
-                    pass
-
-            if hasattr(window, "http_bind") and window.http_bind:
-                try:
-                    ports_to_check.append(int(window.http_bind))
-                except ValueError:
-                    pass
+                    ports_to_check.append(int(value))
+                except (TypeError, ValueError):
+                    continue
 
             # Wait for each port to be released
             for port in ports_to_check:
                 if wait_for_port_release("127.0.0.1", port, max_wait=3):
                     if hasattr(window, "output_text"):
-                        append_log_with_rotation(window, f"端口 {port} 已释放")
+                        append_log_with_rotation(window, f"Port {port} has been released")
                 else:
-                    # 检查是否是TIME_WAIT状态
+                    # Check TIME_WAIT state
                     if is_port_in_timewait_state(port):
                         if hasattr(window, "output_text"):
                             append_log_with_rotation(
                                 window,
-                                f"端口 {port} 处于TIME_WAIT状态，这是正常的（系统会自动释放）",
+                                f"Port {port} is in TIME_WAIT state (the system will release it automatically)",
                             )
                     else:
                         if hasattr(window, "output_text"):
                             append_log_with_rotation(
-                                window, f"警告: 端口 {port} 可能仍在使用中"
+                                window, f"Warning: Port {port} may still be in use"
                             )
 
         except Exception as e:
             # Handle any cleanup errors gracefully
             if hasattr(window, "output_text"):
-                append_log_with_rotation(window, f"清理连接时发生错误: {str(e)}")
+                append_log_with_rotation(window, f"Error occurred while cleaning up connection: {str(e)}")
 
     if hasattr(window, "update_status"):
         window.update_status("状态: 未连接", connected=False)

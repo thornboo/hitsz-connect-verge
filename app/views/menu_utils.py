@@ -66,8 +66,8 @@ def clear_log(window):
     )
     if reply == QMessageBox.Yes:
         window.output_text.clear()
-        # 使用原生append避免轮转逻辑干扰
-        window.output_text.append("日志已手动清空")
+        # Add a confirmation message to the cleared log
+        window.output_text.append("Log has been cleared manually")
 
 
 def check_for_updates(parent, current_version, startup=False):

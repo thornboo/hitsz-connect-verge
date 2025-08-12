@@ -1,6 +1,7 @@
 import sys
 import signal
 import atexit
+import logging
 
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QIcon
@@ -10,6 +11,8 @@ if system() == "Darwin":
     from utils.macos_utils import hide_dock_icon
 from common import resources
 from views.main_window import MainWindow
+
+logger = logging.getLogger(__name__)
 
 # Global variables for cleanup
 app = None
@@ -22,8 +25,9 @@ def cleanup_handler():
     if window:
         try:
             window.stop_connection()
-        except:
-            pass
+        except Exception as e:
+            # Avoid swallowing SystemExit/KeyboardInterrupt by catching only Exception
+            logger.debug("Error during cleanup stop_connection: %s", e)
 
 
 def signal_handler(signum, frame):
