@@ -5,32 +5,40 @@ import time
 from platform import system
 
 from PySide6.QtCore import QThread, Signal
+from .process_utils import run_quiet
 
+# Platform-specific imports
 if system() == "Windows":
+    import winreg as reg
+    import ctypes
     from subprocess import CREATE_NO_WINDOW
 
 
 def get_proxy_settings(window):
-    """Get proxy settings from window HTTP and SOCKS binds"""
+    """Extracts proxy settings from the main window's configuration."""
     http_host, http_port = "127.0.0.1", None
     socks_host, socks_port = "127.0.0.1", None
 
     if hasattr(window, "http_bind") and window.http_bind:
         try:
             http_port = int(window.http_bind)
-        except ValueError:
+        except (ValueError, TypeError):
             pass
 
     if hasattr(window, "socks_bind") and window.socks_bind:
         try:
             socks_port = int(window.socks_bind)
-        except ValueError:
+        except (ValueError, TypeError):
             pass
 
     return http_host, http_port, socks_host, socks_port
 
 
 class CommandWorker(QThread):
+    """
+    A QThread worker that runs an external command, captures its output,
+    and manages system proxy settings.
+    """
     output = Signal(str)
     finished = Signal()
 
@@ -46,312 +54,179 @@ class CommandWorker(QThread):
             "Darwin": set_macos_proxy,
             "Linux": set_linux_proxy,
         }
-        # Derive executable name for robust cleanup
-        try:
-            self.exe_name = os.path.basename(self.command_args[0]) if self.command_args else None
-        except Exception:
-            self.exe_name = None
 
     def run(self):
-        error_occurred = False
+        """The main execution method of the thread."""
         try:
-            # Check if we should stop before starting
             if self._should_stop:
                 return
 
-            # Set proxy if enabled
-            if self.proxy_enabled and self.window:
-                try:
-                    proxy_handler = self._proxy_handlers.get(system())
-                    if proxy_handler:
-                        proxy_handler(True, *get_proxy_settings(self.window))
-                except Exception as e:
-                    self.output.emit(f"Failed to set proxy: {str(e)}\n")
+            self._set_system_proxy(enable=True)
 
-            # Check again before starting process
             if self._should_stop:
                 return
 
-            # Run process
-            try:
-                creation_flags = CREATE_NO_WINDOW if system() == "Windows" else 0
-                self.process = subprocess.Popen(
-                    self.command_args,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    universal_newlines=True,
-                    encoding="utf-8",
-                    creationflags=creation_flags,
-                )
-            except FileNotFoundError as e:
-                self.output.emit(f"Failed to start process: executable not found\n{str(e)}\n")
-                error_occurred = True
-                return
-            except Exception as e:
-                self.output.emit(f"Process start failed: {str(e)}\n")
-                error_occurred = True
-                return
+            # Start the subprocess
+            popen_kwargs = {
+                "stdout": subprocess.PIPE,
+                "stderr": subprocess.STDOUT,
+                "universal_newlines": True,
+                "encoding": "utf-8",
+                "creationflags": CREATE_NO_WINDOW if system() == "Windows" else 0,
+            }
+            if system() != "Windows":
+                popen_kwargs["preexec_fn"] = os.setsid  # Create a new process group
 
-            # Read output with stop checking
-            try:
-                while not self._should_stop and self.process.poll() is None:
-                    line = self.process.stdout.readline()
-                    if line:
-                        self.output.emit(line)
-                    else:
-                        # Small delay to prevent busy waiting
-                        time.sleep(0.1)
-                
-                # Read any remaining output
-                if not self._should_stop:
-                    remaining_output = self.process.stdout.read()
-                    if remaining_output:
-                        self.output.emit(remaining_output)
-                    
-                    # Wait for process and check exit code
-                    exit_code = self.process.wait()
-                    if exit_code != 0:
-                        self.output.emit(f"Process exited with non-zero code: {exit_code}\n")
-                        error_occurred = True
-                        
-            except Exception as e:
-                self.output.emit(f"Error reading process output: {str(e)}\n")
-                error_occurred = True
+            self.process = subprocess.Popen(self.command_args, **popen_kwargs)
 
+            # Read output lines until the process terminates or is stopped
+            while not self._should_stop and self.process.poll() is None:
+                line = self.process.stdout.readline()
+                if line:
+                    self.output.emit(line)
+                else:
+                    # Avoid busy-waiting if the stream is empty
+                    time.sleep(0.05)
+            
+            # Read any remaining output after the loop
+            if self.process:
+                if remaining_output := self.process.stdout.read():
+                    self.output.emit(remaining_output)
+
+                if (exit_code := self.process.wait()) != 0:
+                    self.output.emit(f"Process exited with code: {exit_code}\n")
+
+        except FileNotFoundError:
+            self.output.emit(f"Error: Command not found at {self.command_args[0]}\n")
         except Exception as e:
-            self.output.emit(f"Unexpected error during thread run: {str(e)}\n")
-            error_occurred = True
+            self.output.emit(f"An unexpected error occurred: {e}\n")
         finally:
-            # Disable proxy on completion
-            if self.proxy_enabled:
-                try:
-                    proxy_handler = self._proxy_handlers.get(system())
-                    if proxy_handler:
-                        proxy_handler(False)
-                except Exception as e:
-                    self.output.emit(f"Proxy cleanup failed: {str(e)}\n")
-            
-            # Small delay to allow socket cleanup
-            time.sleep(0.5)
-            
-            # Always emit finished signal to ensure proper cleanup
-            try:
+            self._set_system_proxy(enable=False)
+            # Ensure the finished signal is always emitted for cleanup
+            if not self.isInterruptionRequested():
                 self.finished.emit()
-            except RuntimeError:
-                # Signal connection may have been destroyed, but that's ok
-                pass
 
     def stop(self):
-        # Set stop flag first
+        """Requests the thread and its subprocess to stop gracefully."""
         self._should_stop = True
-        
-        # Request thread interruption
         self.requestInterruption()
-        
-        if self.process:
-            try:
-                # First try graceful termination
-                if system() == "Windows":
-                    # On Windows, use taskkill for a more forceful termination
-                    subprocess.run(
-                        ["taskkill", "/F", "/T", "/PID", str(self.process.pid)],
-                        capture_output=True,
-                        timeout=5
-                    )
-                else:
-                    # On Unix-like systems, try SIGTERM first
-                    self.process.terminate()
-                    try:
-                        # Wait up to 3 seconds for graceful shutdown
-                        self.process.wait(timeout=3)
-                    except subprocess.TimeoutExpired:
-                        # If process doesn't terminate gracefully, kill it
-                        self.process.kill()
-                        self.process.wait(timeout=2)
-                
-                # Additional cleanup: try to kill any remaining zju-connect processes
-                self._cleanup_remaining_processes()
-                
-            except Exception as e:
-                # If all else fails, force kill
-                try:
-                    self.process.kill()
-                    self.process.wait(timeout=2)
-                except:
-                    pass
-            finally:
-                self.process = None
-    
-    def _cleanup_remaining_processes(self):
-        """Clean up any remaining processes of the current executable that might be holding ports"""
+
+        if not self.process:
+            return
+
         try:
-            if not self.exe_name:
-                return
+            # Terminate the process group/tree
             if system() == "Windows":
-                # Find and kill any remaining processes by image name
-                result = subprocess.run(
-                    ["tasklist", "/FI", f"IMAGENAME eq {self.exe_name}", "/FO", "CSV"],
-                    capture_output=True,
-                    text=True,
-                    timeout=5
+                # /T terminates the process and any child processes.
+                run_quiet(
+                    ["taskkill", "/F", "/T", "/PID", str(self.process.pid)],
+                    timeout=3,
                 )
-                if self.exe_name in result.stdout:
-                    subprocess.run(
-                        ["taskkill", "/F", "/IM", self.exe_name],
-                        capture_output=True,
-                        timeout=5
-                    )
             else:
-                # On Unix-like systems, find and kill processes by executable name
-                result = subprocess.run(
-                    ["pgrep", "-f", self.exe_name],
-                    capture_output=True,
-                    text=True,
-                    timeout=5
-                )
-                if result.returncode == 0 and result.stdout.strip():
-                    pids = result.stdout.strip().split('\n')
-                    for pid in pids:
-                        try:
-                            subprocess.run(
-                                ["kill", "-TERM", pid],
-                                capture_output=True,
-                                timeout=2
-                            )
-                        except:
-                            # If TERM fails, try KILL
-                            try:
-                                subprocess.run(
-                                    ["kill", "-KILL", pid],
-                                    capture_output=True,
-                                    timeout=2
-                                )
-                            except:
-                                pass
-        except Exception:
-            # Cleanup is best effort, don't fail if it doesn't work
-            pass
+                # On Unix, terminate the entire process group.
+                pgid = os.getpgid(self.process.pid)
+                os.killpg(pgid, signal.SIGTERM)
+                self.process.wait(timeout=3)
+        except (subprocess.TimeoutExpired, ProcessLookupError):
+            # If graceful termination fails, force kill
+            try:
+                if system() == "Windows":
+                     run_quiet(["taskkill", "/F", "/T", "/PID", str(self.process.pid)])
+                else:
+                    os.killpg(os.getpgid(self.process.pid), signal.SIGKILL)
+            except Exception:
+                pass # Ignore errors on final kill attempt
+        except Exception as e:
+            self.output.emit(f"Error during process termination: {e}\n")
+        finally:
+            self.process = None
+
+    def _set_system_proxy(self, enable: bool):
+        """Enables or disables the system proxy if configured to do so."""
+        if not self.proxy_enabled or not self.window:
+            return
+
+        proxy_handler = self._proxy_handlers.get(system())
+        if not proxy_handler:
+            return
+
+        try:
+            if enable:
+                settings = get_proxy_settings(self.window)
+                proxy_handler(True, *settings)
+            else:
+                proxy_handler(False)
+        except Exception as e:
+            self.output.emit(f"Failed to {{'set' if enable else 'unset'}} proxy: {{e}}\n")
 
 
-def set_windows_proxy(
-    enable, http_host=None, http_port=None, socks_host=None, socks_port=None
-):
-    """Manage proxy settings for Windows using the Windows Registry."""
+def set_windows_proxy(enable, http_host=None, http_port=None, socks_host=None, socks_port=None):
+    """Configures system-wide proxy settings on Windows via the registry."""
     if system() != "Windows":
         return
 
-    import winreg as reg
-    import ctypes
+    INTERNET_SETTINGS = r"Software\Microsoft\Windows\CurrentVersion\Internet Settings"
+    try:
+        with reg.OpenKey(reg.HKEY_CURRENT_USER, INTERNET_SETTINGS, 0, reg.KEY_ALL_ACCESS) as key:
+            reg.SetValueEx(key, "ProxyEnable", 0, reg.REG_DWORD, 1 if enable else 0)
+            if enable and http_host and http_port:
+                proxy_server = f"{http_host}:{http_port}"
+                reg.SetValueEx(key, "ProxyServer", 0, reg.REG_SZ, proxy_server)
 
-    with reg.OpenKey(
-        reg.HKEY_CURRENT_USER,
-        r"Software\Microsoft\Windows\CurrentVersion\Internet Settings",
-        0,
-        reg.KEY_ALL_ACCESS,
-    ) as internet_settings:
-        reg.SetValueEx(
-            internet_settings, "ProxyEnable", 0, reg.REG_DWORD, 1 if enable else 0
-        )
-        if enable and http_host and http_port:
-            reg.SetValueEx(
-                internet_settings,
-                "ProxyServer",
-                0,
-                reg.REG_SZ,
-                f"{http_host}:{http_port}",
-            )
-
-    # Refresh system proxy settings
-    ctypes.windll.Wininet.InternetSetOptionW(0, 37, 0, 0)
-    ctypes.windll.Wininet.InternetSetOptionW(0, 39, 0, 0)
+        # Notify the system that settings have changed
+        INTERNET_OPTION_SETTINGS_CHANGED = 39
+        INTERNET_OPTION_REFRESH = 37
+        ctypes.windll.Wininet.InternetSetOptionW(0, INTERNET_OPTION_SETTINGS_CHANGED, 0, 0)
+        ctypes.windll.Wininet.InternetSetOptionW(0, INTERNET_OPTION_REFRESH, 0, 0)
+    except Exception as e:
+        print(f"Failed to set Windows proxy: {e}")
 
 
-def set_macos_proxy(
-    enable, http_host=None, http_port=None, socks_host=None, socks_port=None
-):
-    """Manage proxy settings for macOS using networksetup."""
+def set_macos_proxy(enable, http_host=None, http_port=None, socks_host=None, socks_port=None):
+    """Configures proxy settings on macOS for all active network services."""
     if system() != "Darwin":
         return
 
-    services = (
-        subprocess.check_output(["networksetup", "-listallnetworkservices"])
-        .decode()
-        .split("\n")[1:]
-    )
-    services = [s for s in services if s and not s.startswith("*")]
+    try:
+        services_output = subprocess.check_output(["networksetup", "-listallnetworkservices"]).decode()
+        services = [s for s in services_output.split("\n")[1:] if s and not s.startswith("*")]
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return
 
     for service in services:
-        if enable and http_host and http_port:
-            subprocess.run(
-                ["networksetup", "-setwebproxy", service, http_host, str(http_port)]
-            )
-            subprocess.run(
-                [
-                    "networksetup",
-                    "-setsecurewebproxy",
-                    service,
-                    http_host,
-                    str(http_port),
-                ]
-            )
-            if socks_host and socks_port:
-                subprocess.run(
-                    [
-                        "networksetup",
-                        "-setsocksfirewallproxy",
-                        service,
-                        socks_host,
-                        str(socks_port),
-                    ]
-                )
-        else:
-            subprocess.run(["networksetup", "-setwebproxystate", service, "off"])
-            subprocess.run(["networksetup", "-setsecurewebproxystate", service, "off"])
-            subprocess.run(
-                ["networksetup", "-setsocksfirewallproxystate", service, "off"]
-            )
+        try:
+            if enable:
+                if http_host and http_port:
+                    run_quiet(["networksetup", "-setwebproxy", service, http_host, str(http_port)])
+                    run_quiet(["networksetup", "-setsecurewebproxy", service, http_host, str(http_port)])
+                if socks_host and socks_port:
+                    run_quiet(["networksetup", "-setsocksfirewallproxy", service, socks_host, str(socks_port)])
+            else:
+                run_quiet(["networksetup", "-setwebproxystate", service, "off"])
+                run_quiet(["networksetup", "-setsecurewebproxystate", service, "off"])
+                run_quiet(["networksetup", "-setsocksfirewallproxystate", service, "off"])
+        except Exception:
+            # Ignore errors for individual services (e.g., inactive ones)
+            continue
 
 
-def set_linux_proxy(
-    enable, http_host=None, http_port=None, socks_host=None, socks_port=None
-):
-    """Manage proxy settings for Linux using gsettings."""
+def set_linux_proxy(enable, http_host=None, http_port=None, socks_host=None, socks_port=None):
+    """Configures proxy settings for GNOME-based desktop environments on Linux."""
     if system() != "Linux":
         return
 
-    if enable and http_host and http_port:
-        subprocess.run(["gsettings", "set", "org.gnome.system.proxy", "mode", "manual"])
-        for protocol in ["http", "https"]:
-            subprocess.run(
-                [
-                    "gsettings",
-                    "set",
-                    f"org.gnome.system.proxy.{protocol}",
-                    "host",
-                    http_host,
-                ]
-            )
-            subprocess.run(
-                [
-                    "gsettings",
-                    "set",
-                    f"org.gnome.system.proxy.{protocol}",
-                    "port",
-                    str(http_port),
-                ]
-            )
-        if socks_host and socks_port:
-            subprocess.run(
-                ["gsettings", "set", "org.gnome.system.proxy.socks", "host", socks_host]
-            )
-            subprocess.run(
-                [
-                    "gsettings",
-                    "set",
-                    "org.gnome.system.proxy.socks",
-                    "port",
-                    str(socks_port),
-                ]
-            )
-    else:
-        subprocess.run(["gsettings", "set", "org.gnome.system.proxy", "mode", "none"])
+    try:
+        if enable:
+            run_quiet(["gsettings", "set", "org.gnome.system.proxy", "mode", "manual"])
+            if http_host and http_port:
+                run_quiet(["gsettings", "set", "org.gnome.system.proxy.http", "host", http_host])
+                run_quiet(["gsettings", "set", "org.gnome.system.proxy.http", "port", str(http_port)])
+                run_quiet(["gsettings", "set", "org.gnome.system.proxy.https", "host", http_host])
+                run_quiet(["gsettings", "set", "org.gnome.system.proxy.https", "port", str(http_port)])
+            if socks_host and socks_port:
+                run_quiet(["gsettings", "set", "org.gnome.system.proxy.socks", "host", socks_host])
+                run_quiet(["gsettings", "set", "org.gnome.system.proxy.socks", "port", str(socks_port)])
+        else:
+            run_quiet(["gsettings", "set", "org.gnome.system.proxy", "mode", "none"])
+    except Exception as e:
+        print(f"Failed to set Linux (GNOME) proxy: {e}")
