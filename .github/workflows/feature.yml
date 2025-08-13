@@ -136,6 +136,9 @@ jobs:
       if: runner.os == 'macOS'
       run: |
         brew install create-dmg
+        set +e
+        DMG_PATH="dist/hitsz-connect-verge-${{ matrix.os_name }}-${{ matrix.arch }}.dmg"
+        APP_PATH="dist/HITSZ Connect Verge.app"
         create-dmg \
           --volname "HITSZ Connect Verge" \
           --background "app/resources/installer/bg.svg" \
@@ -144,8 +147,24 @@ jobs:
           --icon-size 100 \
           --icon "HITSZ Connect Verge.app" 160 185 \
           --app-drop-link 500 185 \
-          "dist/hitsz-connect-verge-${{ matrix.os_name }}-${{ matrix.arch }}.dmg" \
-          "dist/HITSZ Connect Verge.app"
+          "$DMG_PATH" \
+          "$APP_PATH"
+        STATUS=$?
+        if [ $STATUS -ne 0 ]; then
+          echo "create-dmg returned $STATUS; attempting to force detach any leftover dmg.* volumes..."
+          for m in /Volumes/dmg.*; do
+            if [ -d "$m" ]; then
+              hdiutil detach "$m" -force || true
+            fi
+          done
+          if [ -f "$DMG_PATH" ]; then
+            echo "DMG exists at $DMG_PATH; continuing despite unmount issue."
+            exit 0
+          else
+            echo "DMG not found; failing."
+            exit $STATUS
+          fi
+        fi
 
     # Windows specific build        
     - name: Build Executable (Windows)
