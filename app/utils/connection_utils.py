@@ -185,16 +185,78 @@ def start_connection(window):
             append_log_with_rotation(window, f"⚠️ {conflict}")
         append_log_with_rotation(window, "Attempting to connect despite conflicts. If it fails, please check port settings.")
 
-    base_path = os.path.dirname(sys.executable if getattr(sys, 'frozen', False) else os.path.abspath(__file__))
-    if not getattr(sys, 'frozen', False):
-        base_path = os.path.join(base_path, "..", "..")
+    # Resolve core executable path robustly across dev and packaged environments
+    def _resolve_core_executable_path() -> str | None:
+        exe_filename = "zju-connect.exe" if system() == "Windows" else "zju-connect"
 
-    exe_name = "zju-connect.exe" if system() == "Windows" else "zju-connect"
-    command_path = os.path.join(base_path, "app", "core", exe_name)
+        candidate_paths = []
 
-    if not os.path.exists(command_path):
-        error_msg = f"Error: Executable not found at {command_path}"
-        append_log_with_rotation(window, error_msg)
+        # 1) Next to the main executable (packaged case)
+        try:
+            exe_dir = os.path.dirname(sys.executable)
+            candidate_paths.append(os.path.normpath(os.path.join(exe_dir, "app", "core", exe_filename)))
+        except Exception:
+            pass
+
+        # 2) Next to the entry script path (works both in dev and some packaged cases)
+        try:
+            argv_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+            candidate_paths.append(os.path.normpath(os.path.join(argv_dir, "app", "core", exe_filename)))
+        except Exception:
+            pass
+
+        # 3) Relative to this file (dev editable install)
+        try:
+            file_dir = os.path.dirname(os.path.abspath(__file__))
+            candidate_paths.append(os.path.normpath(os.path.join(file_dir, "..", "..", "app", "core", exe_filename)))
+        except Exception:
+            pass
+
+        for path in candidate_paths:
+            if os.path.exists(path):
+                return path
+
+        # 4) Fallback: scan app/core for any zju-connect* binary
+        possible_dirs = set(
+            os.path.dirname(p) for p in candidate_paths if p
+        )
+        for core_dir in possible_dirs:
+            try:
+                if core_dir and os.path.isdir(core_dir):
+                    for name in os.listdir(core_dir):
+                        lower = name.lower()
+                        if lower.startswith("zju-connect") and (
+                            (system() == "Windows" and lower.endswith(".exe")) or (system() != "Windows")
+                        ):
+                            candidate = os.path.join(core_dir, name)
+                            if os.path.exists(candidate):
+                                return candidate
+            except Exception:
+                continue
+
+        return None
+
+    command_path = _resolve_core_executable_path()
+
+    if not command_path or not os.path.exists(command_path):
+        tried = []
+        try:
+            tried.append(os.path.normpath(os.path.join(os.path.dirname(sys.executable), "app", "core")))
+        except Exception:
+            pass
+        try:
+            tried.append(os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "app", "core")))
+        except Exception:
+            pass
+        try:
+            tried.append(os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "app", "core")))
+        except Exception:
+            pass
+
+        append_log_with_rotation(
+            window,
+            "Error: Executable not found. Looked in: " + "; ".join(tried),
+        )
         window.update_status("状态: 启动失败", connected=False, busy=False)
         window.connect_button.setChecked(False)
         return
