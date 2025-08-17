@@ -108,12 +108,21 @@ def is_port_in_timewait_state(port):
                         # Check TIME_WAIT state or PID 0
                         if pid == "0" or "TIME_WAIT" in state:
                             return True
+        else:  # macOS and Linux (Unix-like systems)
+            result = subprocess.run(
+                ["netstat", "-an"], capture_output=True, text=True, timeout=5
+            )
+            for line in result.stdout.split("\n"):
+                if "TIME_WAIT" in line:
+                    parts = line.split()
+                    # Unix systems use 'host:port' format
+                    for part in parts:
+                        if part.endswith(f":{port}"):
+                            return True
     except subprocess.TimeoutExpired:
         logger.debug("Timed out while checking TIME_WAIT state for port %s", port)
     except Exception as e:
-        logger.debug(
-            "Failed to check TIME_WAIT state for port %s: %s", port, e
-        )
+        logger.debug("Failed to check TIME_WAIT state for port %s: %s", port, e)
     return False
 
 
@@ -126,7 +135,7 @@ def wait_for_port_release(host, port, max_wait=5):
 
         # Check if occupied by system process (TIME_WAIT)
         process_info = get_port_process_info(port)
-        if process_info and ("系统进程" in process_info or "System process" in process_info):
+        if process_info and "System process" in process_info:
             # For TIME_WAIT connections, shorter polling may help
             time.sleep(0.05)
         else:
@@ -212,7 +221,7 @@ def _check_single_port_conflict(window, port_type, bind_value, used_ports, prior
         elif is_port_in_use("127.0.0.1", port_value):
             process_info = get_port_process_info(port_value)
             if process_info:
-                if ("系统进程" in process_info) or ("System process" in process_info):
+                if "System process" in process_info:
                     append_log_with_rotation(
                         window,
                         f"⚠️  {port_type} port {port_value} is in TIME_WAIT state, will attempt to wait for release...",
